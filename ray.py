@@ -13,6 +13,9 @@ class Ray():
         scalar = 10
         canvas.create_line(self.origin.x, self.origin.y, self.origin.x + (self.direction.x * scalar), self.origin.y + (self.direction.y * scalar), fill="red", tags="ray")
 
+    def set_angle(self, angle):
+        self.direction = Vec2(math.cos(angle), math.sin(angle))
+
     def intersects(self, b: Boundary):
         x1 = b.a.x
         y1 = b.a.y
