@@ -1,125 +1,151 @@
-from tkinter import Tk, Canvas, Frame, BOTH, Toplevel
-from ray import Ray, Vec2
-from boundary import Boundary
-from origin import RaycastOrigin
+import pygame as pg
+import sys
+import math
 
-import utils
+# Height and Width of screen
+SCREEN_WIDTH = 640
+SCREEN_HEIGHT = 480
+BG_COLOR = (0, 0, 0)
 
-WIDTH = 1600
-HEIGHT = 900
-
-class RaycasterWindow:
-
-    def __init__(self, master):
-        master.title("Raycaster")
-        master.bind("<KeyPress>", self.on_key_press)
-
-        self.frame = Frame(master)
-        self.frame.pack()
-
-        self.render_view = RenderView()
-
-        self.canvas = None
-        self.boundaries: list[Boundary] = []
-        self.raycast_origin = None
-
-        self.initUI()
-
-    def on_key_press(self, event):
-        self.canvas.delete("ray")
-        self.canvas.delete("intersect")
-
-        if event.char == 'a':
-            self.raycast_origin.rotate(-1.0)
-        elif event.char == 'd':
-            self.raycast_origin.rotate(1.0)
-
-        self.raycast_origin.update_rays()
-        self.raycast_origin.draw()
-        
-        distances = self.raycast_origin.intersect(self.boundaries)
-
-        self.render_view.update(distances)
-
-    def onMouseMove(self, event):
-        mouse_x = event.x
-        mouse_y = event.y
-
-        self.canvas.delete("ray")
-        self.canvas.delete("intersect")
-
-        self.raycast_origin.origin = Vec2(mouse_x, mouse_y)
-
-        self.raycast_origin.update_rays()
-        self.raycast_origin.draw()
-        
-        distances = self.raycast_origin.intersect(self.boundaries)
-
-        self.render_view.update(distances)
-
-    def initUI(self):
-        self.canvas = Canvas(self.frame, width=WIDTH, height=HEIGHT, bg="black")
-        self.canvas.bind("<Motion>", self.onMouseMove)
-
-        self.boundaries.append(Boundary(Vec2(0, 0), Vec2(WIDTH, 0)))
-        self.boundaries.append(Boundary(Vec2(WIDTH, 0), Vec2(WIDTH, HEIGHT)))
-        self.boundaries.append(Boundary(Vec2(WIDTH, HEIGHT), Vec2(0, HEIGHT)))
-        self.boundaries.append(Boundary(Vec2(0, HEIGHT), Vec2(0, 0)))
-
-        self.boundaries.append(Boundary(Vec2(1000, 200), Vec2(1000, 700)))
-        self.boundaries.append(Boundary(Vec2(1300, 50), Vec2(1300, 500)))
-        self.boundaries.append(Boundary(Vec2(500, 400), Vec2(300, 500)))
-
-        for b in self.boundaries:
-            b.draw(self.canvas)
-
-        self.raycast_origin = RaycastOrigin(self.canvas, Vec2(WIDTH/2, HEIGHT/2))
-
-        self.canvas.pack(fill=BOTH, expand=1)
-
-class RenderView:
-    def __init__(self):
-        self.frame = Frame(Toplevel(width=WIDTH, height=HEIGHT), width=WIDTH, height=HEIGHT)
-        self.frame.pack()
-
-        self.canvas = None
-
-        self.initUI()
-
-    def initUI(self):
-        self.canvas = Canvas(self.frame, width=WIDTH, height=HEIGHT, bg="black")
-        self.canvas.pack(fill=BOTH, expand=1)
-
-    def _from_rgb(self, rgb):
-        return "#%02x%02x%02x" % rgb 
-
-    def update(self, data: list[float]):
-        # show a label with current value
-        self.canvas.delete("all")
-
-        width = WIDTH / len(data)
-        for i, d in enumerate(data):
-            x1 = i * width
-            y1 = utils.map(d, 0, WIDTH, 0, HEIGHT/2)
-            x2 = x1 + width
-            y2 = HEIGHT - y1
-
-            data_squared = d * d
-            width_squared = WIDTH * WIDTH
-
-            raw_color = utils.map(data_squared, 0, width_squared, 255, 0) if d < float("inf") else 0
-            color = int(raw_color)
-
-            self.canvas.create_rectangle(x1, y1, x2, y2, fill=self._from_rgb((color, color, color)), outline=self._from_rgb((color, color, color)))
+GAME_MAP = [
+    "####################",
+    "#.................#",
+    "#..1...1..........#",
+    "#..1...1..........#",
+    "#..1...1..........#",
+    "#..11111..........#",
+    "#.................#",
+    "#.................#",
+    "#.................#",
+    "#.................#",
+    "#.................#",
+    "#.................#",
+    "#.................#",
+    "#.................#",
+    "#.................#",
+    "#.................#",
+    "#...22.......22...#",
+    "#...22.......22...#",
+    "#.................#",
+    "####################",
+]
 
 def main():
+    pg.init()
+    clock = pg.time.Clock()
+    screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
-    root = Tk()
-    window = RaycasterWindow(root)
+    pg.display.set_caption("Move It!")
+    pos_x, pos_y = 10, 10
+    dir_x, dir_y = -1.0, 0.0
+    plane_x, plane_y = 0.0, 0.66
 
-    root.geometry(f"{WIDTH}x{HEIGHT}")
-    root.mainloop()
+    while True:
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
 
+        screen.fill(BG_COLOR)
+       
+        # Loop over all pixels in the screen
+        for x in range(SCREEN_WIDTH):
+            camera_x = 2.0 * x / SCREEN_WIDTH - 1.0
+            ray_dir_x = dir_x + plane_x * camera_x
+            ray_dir_y = dir_y + plane_y * camera_x
 
-if __name__ == '__main__':
+            map_x = int(pos_x)
+            map_y = int(pos_y)
+
+            delta_dist_x = math.sqrt(1 + (ray_dir_y * ray_dir_y) / (ray_dir_x * ray_dir_x)) if ray_dir_x != 0.0 else 1e30
+            delta_dist_y = math.sqrt(1 + (ray_dir_x * ray_dir_x) / (ray_dir_y * ray_dir_y)) if ray_dir_y != 0.0 else 1e30
+
+            step_x, step_y = 0, 0
+            side_dist_x, side_dist_y = 0, 0
+            perp_wall_dist = 0
+
+            if ray_dir_x < 0:
+                step_x = -1
+                side_dist_x = (pos_x - map_x) * delta_dist_x
+            else:
+                step_x = 1
+                side_dist_x = (map_x + 1.0 - pos_x) * delta_dist_x
+
+            if ray_dir_y < 0:
+                step_y = -1
+                side_dist_y = (pos_y - map_y) * delta_dist_y
+            else:
+                step_y = 1
+                side_dist_y = (map_y + 1.0 - pos_y) * delta_dist_y
+
+            hit = 0
+            side = 0
+
+            while hit == 0:
+                if side_dist_x < side_dist_y:
+                    side_dist_x += delta_dist_x
+                    map_x += step_x
+                    side = 0
+                else:
+                    side_dist_y += delta_dist_y
+                    map_y += step_y
+                    side = 1
+
+                if GAME_MAP[map_x][map_y] in ["#", "1", "2"]:
+                    hit = 1
+            
+            if side == 0:
+                perp_wall_dist = (map_x - pos_x + (1 - step_x) / 2) / ray_dir_x
+            else:
+                perp_wall_dist = (map_y - pos_y + (1 - step_y) / 2) / ray_dir_y
+
+            line_height = int(SCREEN_HEIGHT / perp_wall_dist)
+
+            draw_start = -line_height / 2 + SCREEN_HEIGHT / 2
+            if draw_start < 0:
+                draw_start = 0
+            draw_end = line_height / 2 + SCREEN_HEIGHT / 2
+            if draw_end >= SCREEN_HEIGHT:
+                draw_end = SCREEN_HEIGHT - 1
+
+            color = (255, 255, 255)
+            if GAME_MAP[map_x][map_y] == "#":
+                color = (255, 255, 255)
+            elif GAME_MAP[map_x][map_y] == "1":
+                color = (255, 0, 0)
+            elif GAME_MAP[map_x][map_y] == "2":
+                color = (0, 255, 0)
+
+            pg.draw.line(screen, color, (x, draw_start), (x, draw_end))
+
+        # Use keys to moce the player
+        if pg.key.get_pressed()[pg.K_LEFT]:
+            old_dir_x = dir_x
+            dir_x = dir_x * math.cos(0.1) - dir_y * math.sin(0.1)
+            dir_y = old_dir_x * math.sin(0.1) + dir_y * math.cos(0.1)
+            old_plane_x = plane_x
+            plane_x = plane_x * math.cos(0.1) - plane_y * math.sin(0.1)
+            plane_y = old_plane_x * math.sin(0.1) + plane_y * math.cos(0.1)
+        if pg.key.get_pressed()[pg.K_RIGHT]:
+            old_dir_x = dir_x
+            dir_x = dir_x * math.cos(-0.1) - dir_y * math.sin(-0.1)
+            dir_y = old_dir_x * math.sin(-0.1) + dir_y * math.cos(-0.1)
+            old_plane_x = plane_x
+            plane_x = plane_x * math.cos(-0.1) - plane_y * math.sin(-0.1)
+            plane_y = old_plane_x * math.sin(-0.1) + plane_y * math.cos(-0.1)
+        if pg.key.get_pressed()[pg.K_UP]:
+            if GAME_MAP[int(pos_x + dir_x * 0.1)][int(pos_y)] == ".":
+                pos_x += dir_x * 0.1
+            if GAME_MAP[int(pos_x)][int(pos_y + dir_y * 0.1)] == ".":
+                pos_y += dir_y * 0.1
+        if pg.key.get_pressed()[pg.K_DOWN]:
+            if GAME_MAP[int(pos_x - dir_x * 0.1)][int(pos_y)] == ".":
+                pos_x -= dir_x * 0.1
+            if GAME_MAP[int(pos_x)][int(pos_y - dir_y * 0.1)] == ".":
+                pos_y -= dir_y * 0.1
+
+        pg.display.update()
+        clock.tick(60)
+
+if __name__ == "__main__":
     main()
